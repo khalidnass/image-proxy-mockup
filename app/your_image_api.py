@@ -12,6 +12,8 @@ THE CONTRACT (the same for both functions)
            model      str          the model name LiteLLM sent
            n          int          how many images (1 to MAX_IMAGES)
            size       str | None  for example "1024x1024", or None
+           extra      dict         your EXTRA_PARAMS (below) the caller sent, already
+                                   checked and typed; only declared names, maybe empty
            user       str          the verified user name (for your own audit,
                                    not a secret; the user's token is NOT given here)
            http       httpx.AsyncClient   a shared client; pass your own timeout
@@ -53,6 +55,22 @@ class ImageBackendError(Exception):
 
 
 # ============================================================================
+# ===   YOUR EXTRA PARAMETERS: the non-OpenAI parameters your image      ===
+# ===   service takes. Name -> type (int, float, bool or str).           ===
+# ===   A caller sends them as body fields (JSON on create, form fields  ===
+# ===   on edit) or in the x-image-params header as one JSON object;     ===
+# ===   the header wins. They reach create_image/edit_image as `extra`,  ===
+# ===   checked and typed. They never go to the LLM or to a log line.    ===
+# ===   These three are an example: change them to yours.               ===
+# ============================================================================
+EXTRA_PARAMS: dict[str, type] = {
+    "steps": int,
+    "seed": int,
+    "negative_prompt": str,
+}
+
+
+# ============================================================================
 # ============================================================================
 # ===                                                                      ===
 # ===        PUT YOUR API CALL OR YOUR OWN CODE HERE  (create)             ===
@@ -67,11 +85,12 @@ class ImageBackendError(Exception):
 # ===                                                                      ===
 # ============================================================================
 # ============================================================================
-async def create_image(*, prompt: str, model: str, n: int, size: str | None, user: str,
-                       http: httpx.AsyncClient, settings: Settings) -> ImageOutput:
+async def create_image(*, prompt: str, model: str, n: int, size: str | None, extra: dict,
+                       user: str, http: httpx.AsyncClient, settings: Settings) -> ImageOutput:
     # The shipped body calls the mock backend (mock_backend/), which speaks
-    # the OpenAI image shape. Add your endpoint's own auth header here.
-    body = {"prompt": prompt, "n": n, "size": size or "256x256"}
+    # the OpenAI image shape plus the three example extras. Add your
+    # endpoint's own auth header here, and map `extra` to its own names.
+    body = {"prompt": prompt, "n": n, "size": size or "256x256", **extra}
     r = await _post(http, f"{settings.image_backend_url}/v1/images/generations",
                     settings, json=body)
     return _openai_shape_to_output(r)
@@ -88,12 +107,13 @@ async def create_image(*, prompt: str, model: str, n: int, size: str | None, use
 # ============================================================================
 # ============================================================================
 async def edit_image(*, prompt: str, image: bytes, mask: bytes | None, model: str, n: int,
-                     size: str | None, user: str, http: httpx.AsyncClient,
+                     size: str | None, extra: dict, user: str, http: httpx.AsyncClient,
                      settings: Settings) -> ImageOutput:
     files = {"image": ("image.png", image, "image/png")}
     if mask is not None:
         files["mask"] = ("mask.png", mask, "image/png")
-    data = {"prompt": prompt, "n": str(n), "size": size or "256x256"}
+    data = {"prompt": prompt, "n": str(n), "size": size or "256x256",
+            **{k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in extra.items()}}
     r = await _post(http, f"{settings.image_backend_url}/v1/images/edits",
                     settings, data=data, files=files)
     return _openai_shape_to_output(r)

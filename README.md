@@ -25,11 +25,24 @@ Open `app/your_image_api.py`: `create_image(...)` and `edit_image(...)` sit unde
 **PUT YOUR API CALL OR YOUR OWN CODE HERE**. Either point `IMAGE_BACKEND_URL` at your endpoint and adapt
 the request and response mapping, or replace the function body with your own code.
 
-- **In:** `prompt`, `model`, `n`, `size`, `user` (verified name), `http`, `settings`; edit adds `image`, `mask`.
+- **In:** `prompt`, `model`, `n`, `size`, `extra`, `user` (verified name), `http`, `settings`; edit adds
+  `image`, `mask`.
 - **Out:** `ImageOutput(images=[raw bytes, ...], revised_prompt=None)`.
 - **Error:** raise `ImageBackendError("short message")`; the caller gets 502.
 
 If your code improves the prompt itself, remove `enrich` from `STEPS` in `app/pipeline.py`.
+
+### Extra parameters
+
+If your image service takes parameters the OpenAI call does not have, declare them in the same file:
+`EXTRA_PARAMS = {"steps": int, "seed": int, "negative_prompt": str}` (types `int`, `float`, `bool`, `str`).
+Your functions get them as `extra`, checked and typed; undeclared names never reach them.
+
+- **In the body** (use this first): a top-level JSON field on create, a form field on edit.
+- **In the `x-image-params` header** (the spare): one JSON object, at most 4 KB, for a client or a gateway that
+  drops body fields it does not know. If a name comes both ways, the header wins.
+- **Refused with 400:** an unknown name, a wrong type, a value too long or not finite, a bad header. Text values
+  pass the same content rules as the prompt. Values never go to the LLM or to a log line.
 
 ## Run the proxy
 
@@ -95,6 +108,13 @@ curl -s -o edit.json -w '%{http_code}\n' "$LITELLM/v1/images/edits" \
 curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'                         # 403: no user token
+curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
+  -H "Authorization: Bearer $KEY" -H "x-user-token: $USER_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse", "steps": 20, "seed": 7}'    # 200: extras in the body
+curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
+  -H "Authorization: Bearer $KEY" -H "x-user-token: $USER_TOKEN" -H 'Content-Type: application/json' \
+  -H 'x-image-params: {"negative_prompt": "fog"}' \
+  -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'                         # 200: extras in the header
 ```
 
 ## Stage 2 — behind a gateway
@@ -118,6 +138,11 @@ curl -s -o edit.json -w '%{http_code}\n' "$GATEWAY/v1/images/edits" -H "Authoriz
   -F model=image-proxy-mockup -F prompt='make it blue' -F image=@create.png             # 200
 curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" -H 'Content-Type: application/json' \
   -d '{"model": "image-proxy-mockup", "prompt": "x"}'                                    # 401: no token
+curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/edits" -H "Authorization: Bearer $USER_TOKEN" \
+  -F model=image-proxy-mockup -F prompt='make it blue' -F steps=20 -F image=@create.png # 200: extras as form fields
+curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" \
+  -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
+  -H 'x-image-params: {"seed": 7}' -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'  # 200: header
 ```
 
 ## What the answer means

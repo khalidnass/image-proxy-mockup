@@ -1,6 +1,6 @@
 [project]
 name = "image-proxy-mockup"
-version = "0.1.1"
+version = "0.2.0"
 description = "An OpenAI-compatible image proxy behind LiteLLM: guardrails, enrichment with the user's own token, and one marked place for your image code."
 requires-python = ">=3.12"
 license = "MIT"

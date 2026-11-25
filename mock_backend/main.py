@@ -104,6 +104,14 @@ async def chat(request: Request):
                   "total_tokens": prompt_tokens + completion_tokens}})
 
 
+EXTRAS = ("steps", "seed", "negative_prompt")  # the example extra parameters
+
+
+def _extras_seed(fields) -> str:
+    """The example extras, folded into the picture's hash so a test can see they arrived."""
+    return "|".join(f"{k}={fields.get(k)}" for k in EXTRAS if fields.get(k) is not None)
+
+
 @app.post("/v1/images/generations")
 async def generations(request: Request):
     body = await request.json()
@@ -112,7 +120,8 @@ async def generations(request: Request):
         return _bad("prompt is required")
     n = max(1, min(int(body.get("n") or 1), 4))
     side = _side(body.get("size"))
-    return _answer([gradient(f"{prompt}|{i}".encode(), side) for i in range(n)])
+    extra = _extras_seed(body)
+    return _answer([gradient(f"{prompt}|{i}|{extra}".encode(), side) for i in range(n)])
 
 
 @app.post("/v1/images/edits")
@@ -126,4 +135,5 @@ async def edits(request: Request):
     n = max(1, min(int(form.get("n") or 1), 4))
     side = _side(form.get("size"))
     digest = hashlib.sha256(data).digest()
-    return _answer([stripes(f"{prompt}|{i}".encode() + digest, side) for i in range(n)])
+    extra = _extras_seed(form)
+    return _answer([stripes(f"{prompt}|{i}|{extra}".encode() + digest, side) for i in range(n)])

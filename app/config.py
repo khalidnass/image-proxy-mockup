@@ -22,6 +22,8 @@ class Settings:
     proxy_api_key: str
     # Where the person's token arrives, and how it is checked.
     user_token_header: str = "x-user-token"
+    # The header that may carry extra parameters as one JSON object.
+    extra_params_header: str = "x-image-params"
     oidc_issuer: str = ""
     oidc_jwks_url: str = ""
     oidc_audiences: tuple[str, ...] = ()
@@ -54,6 +56,8 @@ class Settings:
             raise ConfigError(
                 f"ENRICH_MODEL {self.enrich_model!r} is a model this proxy serves: "
                 "the enrichment call would loop back here")
+        if self.extra_params_header == self.user_token_header:
+            raise ConfigError("EXTRA_PARAMS_HEADER must not be USER_TOKEN_HEADER")
         if not self.served_models:
             raise ConfigError("SERVED_MODELS must name at least one model")
         if not 0 < self.request_deadline_seconds < 300:
@@ -73,6 +77,7 @@ def from_env(env: dict | None = None) -> Settings:
     return Settings(
         proxy_api_key=e.get("PROXY_API_KEY", ""),
         user_token_header=get("USER_TOKEN_HEADER", "user_token_header").lower(),
+        extra_params_header=get("EXTRA_PARAMS_HEADER", "extra_params_header").lower(),
         oidc_issuer=get("OIDC_ISSUER", "oidc_issuer"),
         oidc_jwks_url=get("OIDC_JWKS_URL", "oidc_jwks_url"),
         oidc_audiences=_list(e.get("OIDC_AUDIENCES", "")),

@@ -35,6 +35,7 @@ class Job:
     size: str | None = None
     image: bytes | None = None  # edit only
     mask: bytes | None = None   # edit only
+    extra: dict = field(default_factory=dict)  # checked extra parameters: image code only
     # Filled in by the steps:
     revised_prompt: str | None = None
     enriched: bool = False
@@ -71,7 +72,7 @@ async def enrich(job: Job, ctx: Context) -> None:
 
 
 async def image(job: Job, ctx: Context) -> None:
-    common = dict(prompt=job.prompt, model=job.model, n=job.n, size=job.size,
+    common = dict(prompt=job.prompt, model=job.model, n=job.n, size=job.size, extra=dict(job.extra),
                   user=ctx.user.name, http=ctx.http, settings=ctx.settings)
     try:
         if job.kind == "edit":

@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
-from . import logs, pipeline
+from . import extras, logs, pipeline, your_image_api
 from .auth import TokenVerifier, check_caller
 from .config import Settings, from_env
 from .errors import ProxyError
@@ -36,6 +36,7 @@ def _request_id(request: Request) -> str:
 def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None = None) -> FastAPI:
     settings = settings or from_env()
     logs.setup()
+    declared = extras.check_declared(dict(your_image_api.EXTRA_PARAMS))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -125,7 +126,9 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
             raise ProxyError(400, "The body must be a JSON object.")
         prompt, model, n, size = _common(body.get("prompt"), body.get("model"), body.get("n"),
                                          body.get("size"), body.get("response_format"))
-        return pipeline.Job(kind="create", prompt=prompt, model=model, n=n, size=size)
+        extra = extras.collect(body=body, header=request.headers.get(settings.extra_params_header),
+                               kind="create", declared=declared, settings=settings, from_form=False)
+        return pipeline.Job(kind="create", prompt=prompt, model=model, n=n, size=size, extra=extra)
 
     async def _read_file(form, *names: str) -> bytes | None:
         for name in names:
@@ -150,8 +153,11 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
         if not image:
             raise ProxyError(400, "An image file is required.", param="image")
         mask = await _read_file(form, "mask")
+        fields = {name: form.get(name) for name in form.keys()}
+        extra = extras.collect(body=fields, header=request.headers.get(settings.extra_params_header),
+                               kind="edit", declared=declared, settings=settings, from_form=True)
         return pipeline.Job(kind="edit", prompt=prompt, model=model, n=n, size=size,
-                            image=image, mask=mask)
+                            image=image, mask=mask, extra=extra)
 
     @app.post("/v1/images/generations")
     async def generations(request: Request):
