@@ -39,7 +39,9 @@ def test_chat_is_a_deterministic_openai_answer():
     assert d["object"] == "chat.completion"
     assert d["choices"][0]["message"]["content"] == "a red fox, clear subject, soft light, simple composition"
     assert d["usage"]["total_tokens"] == d["usage"]["prompt_tokens"] + d["usage"]["completion_tokens"] > 0
-    assert c.post("/v1/chat/completions", json=body).json()["choices"] == d["choices"]
+    again = c.post("/v1/chat/completions", json=body).json()
+    assert again["choices"] == d["choices"]
+    assert again["id"] != d["id"]  # one usage record per answer, even for the same prompt
 
 
 def test_chat_refuses_empty_and_streaming():

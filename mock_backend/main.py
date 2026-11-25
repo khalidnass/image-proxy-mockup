@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import time
+import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -105,7 +106,8 @@ async def chat(request: Request):
     prompt_tokens = sum(len(str(m.get("content") or "").split()) for m in messages if isinstance(m, dict))
     completion_tokens = len(answer.split())
     return JSONResponse({
-        "id": "chatcmpl-mock-" + hashlib.sha256(answer.encode()).hexdigest()[:12],
+        # a fresh id per answer: a gateway keeps one usage record per id
+        "id": "chatcmpl-mock-" + uuid.uuid4().hex[:24],
         "object": "chat.completion", "created": int(time.time()),
         "model": str(body.get("model") or "mock-llm"),
         "choices": [{"index": 0, "finish_reason": "stop",
