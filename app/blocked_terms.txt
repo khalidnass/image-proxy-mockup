@@ -1,0 +1,4 @@
+# One term per line, matched as a whole word, case does not matter.
+# A sample list for the mockup: replace it with your own rules.
+forbidden-example
+blocked-example

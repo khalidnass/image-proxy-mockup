@@ -1,0 +1,54 @@
+# The mock backend: a stand-in for your own image endpoint, and a tiny chat
+# model (POST /v1/chat/completions) for the enrichment step. Delete it when
+# your_image_api.py calls the real thing and ENRICH_MODEL is a real model.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-mock-backend
+  labels: {app: image-mock-backend}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: image-mock-backend}}
+  template:
+    metadata:
+      labels: {app: image-mock-backend}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: mock
+          image: <your registry>/image-proxy-mockup:0.1.1
+          command: ["uvicorn", "mock_backend.main:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log"]
+          ports: [{containerPort: 8081}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8081}}
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-mock-backend
+spec:
+  selector: {app: image-mock-backend}
+  ports: [{port: 8081, targetPort: 8081}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: image-mock-backend
+spec:
+  podSelector: {matchLabels: {app: image-mock-backend}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: image-proxy}}
+        # LiteLLM, if it serves the mock as a chat model (examples/litellm-model.yaml)
+        - podSelector: {matchLabels: {app: <your litellm pod label>}}
+      ports: [{port: 8081}]

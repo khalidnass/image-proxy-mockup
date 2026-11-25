@@ -1,0 +1,79 @@
+# The image proxy and the mock backend, for any Kubernetes cluster.
+# Fill every <your ...> value. Apply with:  kubectl -n <your-namespace> apply -f deploy/
+#
+# The proxy's one secret is PROXY_API_KEY: the same value goes into the
+# LiteLLM model entry's api_key (examples/litellm-model.yaml). Make it with:
+#   kubectl -n <your-namespace> create secret generic image-proxy \
+#     --from-literal=PROXY_API_KEY="$(openssl rand -hex 32)"
+# (Do not keep the value in git.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-proxy
+data:
+  OIDC_ISSUER: "https://<your identity provider>/realms/<your realm>"
+  # Optional: a JWKS address the pod can reach when the issuer URL is not
+  # reachable from inside the cluster. Empty: discovery from OIDC_ISSUER.
+  OIDC_JWKS_URL: ""
+  OIDC_AUDIENCES: ""               # comma list; empty = audience not checked
+  OIDC_AUTHORIZED_PARTIES: ""      # comma list of client ids (azp); empty = not checked
+  USER_TOKEN_HEADER: "x-user-token"
+  LLM_BASE_URL: "https://<your gateway host>/v1"
+  ENRICH_MODEL: "<your chat model name>"   # or image-proxy-mock-llm: the mock, no real LLM
+  SERVED_MODELS: "image-proxy-mockup"
+  IMAGE_BACKEND_URL: "http://image-mock-backend:8081"
+  REQUEST_DEADLINE_SECONDS: "240"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-proxy
+  labels: {app: image-proxy}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: image-proxy}}
+  template:
+    metadata:
+      labels: {app: image-proxy}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: proxy
+          image: <your registry>/image-proxy-mockup:0.1.1
+          ports: [{containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: image-proxy}
+            - secretRef: {name: image-proxy}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}}
+          livenessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 20}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-proxy
+spec:
+  selector: {app: image-proxy}
+  ports: [{port: 8080, targetPort: 8080}]
+---
+# Only LiteLLM may reach the proxy. Set the selector to your LiteLLM pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: image-proxy
+spec:
+  podSelector: {matchLabels: {app: image-proxy}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: <your litellm pod label>}}
+      ports: [{port: 8080}]

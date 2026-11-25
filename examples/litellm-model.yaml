@@ -1,0 +1,42 @@
+# LiteLLM: the model entry and the one setting. Two parts of config.yaml.
+
+model_list:
+  - model_name: image-proxy-mockup
+    litellm_params:
+      model: openai/image-proxy-mockup          # openai/<the name the proxy serves>
+      api_base: http://image-proxy.<your-namespace>.svc:8080/v1
+      api_key: os.environ/IMAGE_PROXY_API_KEY    # the proxy's PROXY_API_KEY
+      timeout: 280                               # above the proxy's deadline, below the route's
+    model_info:
+      mode: image_generation
+      # access_groups: [<your group>]            # if your keys hold models by access group
+
+  # Optional: the mock backend as a chat model, so enrichment needs no real
+  # LLM (set the proxy's ENRICH_MODEL to this name). Do NOT add it to the
+  # forward list below: it must never receive the user's token.
+  - model_name: image-proxy-mock-llm
+    litellm_params:
+      model: openai/mock-llm
+      api_base: http://image-mock-backend.<your-namespace>.svc:8081/v1
+      api_key: not-a-secret                      # the mock checks no key
+    model_info:
+      mode: chat
+      # access_groups: [<your group>]
+
+litellm_settings:
+  model_group_settings:
+    # LiteLLM passes the caller's x- headers (the user token among them) to
+    # THESE models only. Name only the image proxy here: every model in this
+    # list receives the person's token.
+    forward_client_headers_to_llm_api:
+      - image-proxy-mockup
+
+# The same model through the API instead of config.yaml (store_model_in_db: true):
+#   POST /model/new
+#   {"model_name": "image-proxy-mockup",
+#    "litellm_params": {"model": "openai/image-proxy-mockup",
+#                       "api_base": "http://image-proxy.<your-namespace>.svc:8080/v1",
+#                       "api_key": "<the proxy's PROXY_API_KEY>", "timeout": 280},
+#    "model_info": {"mode": "image_generation"}}
+# The forward setting itself has to be in config.yaml (litellm_settings), and
+# LiteLLM reads it at start: restart LiteLLM after adding it.
