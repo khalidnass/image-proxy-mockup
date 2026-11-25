@@ -41,12 +41,22 @@ if not log.handlers:
 
 app = FastAPI(title="mock-image-backend", docs_url=None, redoc_url=None, openapi_url=None)
 _SIZE = re.compile(r"^(\d{2,4})x(\d{2,4})$")
-MAX_SIDE = 512  # keep the mock cheap whatever size is asked
+MAX_SIDE = 1024  # the size asked for, up to this on each side; above it, 400
 
 
-def _side(size: str | None) -> int:
+class _TooBig(ValueError):
+    pass
+
+
+def _dims(size: str | None) -> tuple[int, int]:
+    """The width and height asked for (256x256 when none or not WxH)."""
     m = _SIZE.match(size or "")
-    return min(int(m.group(1)), MAX_SIDE) if m else 256
+    if not m:
+        return 256, 256
+    w, h = int(m.group(1)), int(m.group(2))
+    if not (1 <= w <= MAX_SIDE and 1 <= h <= MAX_SIDE):
+        raise _TooBig
+    return w, h
 
 
 def _answer(images: list[bytes]) -> JSONResponse:
@@ -119,9 +129,12 @@ async def generations(request: Request):
     if not prompt:
         return _bad("prompt is required")
     n = max(1, min(int(body.get("n") or 1), 4))
-    side = _side(body.get("size"))
+    try:
+        w, h = _dims(body.get("size"))
+    except _TooBig:
+        return _bad(f"size must be at most {MAX_SIDE}x{MAX_SIDE}")
     extra = _extras_seed(body)
-    return _answer([gradient(f"{prompt}|{i}|{extra}".encode(), side) for i in range(n)])
+    return _answer([gradient(f"{prompt}|{i}|{extra}".encode(), w, h) for i in range(n)])
 
 
 @app.post("/v1/images/edits")
@@ -133,7 +146,10 @@ async def edits(request: Request):
         return _bad("prompt and image are required")
     data = await image.read()
     n = max(1, min(int(form.get("n") or 1), 4))
-    side = _side(form.get("size"))
+    try:
+        w, h = _dims(form.get("size"))
+    except _TooBig:
+        return _bad(f"size must be at most {MAX_SIDE}x{MAX_SIDE}")
     digest = hashlib.sha256(data).digest()
     extra = _extras_seed(form)
-    return _answer([stripes(f"{prompt}|{i}|{extra}".encode() + digest, side) for i in range(n)])
+    return _answer([stripes(f"{prompt}|{i}|{extra}".encode() + digest, w, h) for i in range(n)])

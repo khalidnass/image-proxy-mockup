@@ -40,7 +40,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: proxy
-          image: <your registry>/image-proxy-mockup:0.2.0
+          image: <your registry>/image-proxy-mockup:0.2.1
           ports: [{containerPort: 8080}]
           envFrom:
             - configMapRef: {name: image-proxy}

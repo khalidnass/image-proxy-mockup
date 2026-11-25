@@ -1,6 +1,8 @@
 """The mock backend draws real, different PNGs for create and edit."""
 import base64
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from mock_backend.main import app
@@ -84,3 +86,39 @@ def test_the_proxy_enriches_with_the_mock_llm(monkeypatch):
         r = gen(proxy, make_token(), prompt="a red fox")
     assert r.status_code == 200 and r.headers["x-prompt-enriched"] == "true"
     assert r.json()["data"][0]["revised_prompt"] == "a red fox, clear subject, soft light, simple composition"
+
+
+def _dims(png: bytes) -> tuple[int, int]:
+    import struct
+    return struct.unpack(">II", png[16:24])
+
+
+@pytest.mark.parametrize("size", ["1024x1024", "256x256", "1024x512", "64x64"])
+def test_the_size_asked_for_is_the_size_returned(size):
+    want = tuple(int(v) for v in size.split("x"))
+    a = _png(c.post("/v1/images/generations", json={"prompt": "a fox", "size": size}))
+    b = _png(c.post("/v1/images/edits", data={"prompt": "a fox", "size": size},
+                    files={"image": ("i.png", gradient(b"i", 8), "image/png")}))
+    assert _dims(a) == want and _dims(b) == want
+
+
+@pytest.mark.parametrize("size", ["2048x2048", "1025x1024", "1024x2048"])
+def test_a_size_above_1024_is_refused(size):
+    r = c.post("/v1/images/generations", json={"prompt": "a fox", "size": size})
+    assert r.status_code == 400 and "1024" in r.json()["error"]["message"]
+    r = c.post("/v1/images/edits", data={"prompt": "a fox", "size": size},
+               files={"image": ("i.png", gradient(b"i", 8), "image/png")})
+    assert r.status_code == 400
+
+
+def test_a_1024_picture_is_cheap_and_valid():
+    import time
+    import zlib
+    started = time.perf_counter()
+    png = gradient(b"seed", 1024)
+    assert time.perf_counter() - started < 2.0
+    assert _dims(png) == (1024, 1024)
+    # the pixel data inflates to height * (1 + 3 * width) bytes
+    length = int.from_bytes(png[33:37], "big")
+    assert png[37:41] == b"IDAT"
+    assert len(zlib.decompress(png[41:41 + length])) == 1024 * (1 + 3 * 1024)
