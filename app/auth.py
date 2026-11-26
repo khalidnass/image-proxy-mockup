@@ -38,6 +38,12 @@ def check_caller(request: Request, settings: Settings) -> None:
         raise unauthorized("This endpoint answers only the gateway's LiteLLM.", "invalid_proxy_key")
 
 
+def header_id(request: Request, settings: Settings) -> str | None:
+    """The gateway's user id when it is a plain id, else None (for the log line of a refusal)."""
+    value = (request.headers.get(settings.user_id_header) or "").strip()
+    return value if _USER_ID.match(value) else None
+
+
 def user_from(request: Request, body_user, settings: Settings) -> User:
     """The person: the gateway's header first; the body's `user` only if trusted."""
     value = (request.headers.get(settings.user_id_header) or "").strip()

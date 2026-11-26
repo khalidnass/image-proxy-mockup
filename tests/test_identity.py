@@ -173,3 +173,12 @@ def test_keys_never_reach_an_answer_or_the_image_code(make_client, monkeypatch):
     for r in answers:
         for k in ("model-server-key-0123456789", "image-key-0123456789", PROXY_KEY):
             assert k not in r.text
+
+
+def test_a_refusal_while_reading_the_body_still_logs_the_user_id(client, capsys):
+    capsys.readouterr()
+    assert gen(client, uid("frank"), negative_prompt="a blocked-example").status_code == 400
+    assert gen(client, uid("frank"), guidance=3).status_code == 400
+    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
+    refused = [x for x in lines if str(x.get("status", "")).startswith("refused")]
+    assert len(refused) == 2 and all(x.get("user") == "frank" for x in refused)

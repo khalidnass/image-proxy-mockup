@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
 from . import extras, logs, pipeline, your_image_api
-from .auth import check_caller, user_from
+from .auth import check_caller, header_id, user_from
 from .config import Settings, from_env
 from .errors import ProxyError
 
@@ -76,6 +76,7 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
         user_name = None
         try:
             check_caller(request, settings)
+            user_name = header_id(request, settings)  # so a refusal's log line names the person too
             job = await read_job(request)
             user = user_from(request, job.body_user, settings)
             user_name = user.name
