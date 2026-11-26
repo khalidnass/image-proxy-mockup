@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile
 
-from . import extras, logs, pipeline, your_image_api
+from . import extras, logs, pipeline, your_custom_api, your_image_api
 from .auth import check_caller, header_id, user_from
 from .config import Settings, from_env
 from .errors import ProxyError
@@ -167,6 +167,9 @@ def create_app(settings: Settings | None = None, http: httpx.AsyncClient | None 
     @app.post("/v1/images/edits")
     async def edits(request: Request):
         return await _handle(request, "edit", _read_edit)
+
+    # your own routes (app/your_custom_api.py): copy that file and add its router here
+    app.include_router(your_custom_api.router(settings))
 
     return app
 

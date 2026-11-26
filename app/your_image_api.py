@@ -70,11 +70,15 @@ class ImageBackendError(Exception):
 # ===   go to the LLM or to a log line.                                  ===
 # ===   As shipped: Qwen-Image's own inputs, as vLLM names them.         ===
 # ============================================================================
+# One list serves both create_image and edit_image: each gets `extra`.
 EXTRA_PARAMS: dict[str, type] = {
     "negative_prompt": str,       # what to keep out; Qwen needs one for true_cfg_scale to act
     "true_cfg_scale": float,      # Qwen-Image's guidance strength
     "num_inference_steps": int,   # denoising steps
     "seed": int,                  # the same seed gives the same picture
+    # your own inputs go here too, for example:
+    # "style_preset": str,
+    # "strength": float,
 }
 
 
