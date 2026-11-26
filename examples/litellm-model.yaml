@@ -30,5 +30,5 @@ litellm_settings:
 # The forward setting itself has to be in config.yaml (litellm_settings), and
 # LiteLLM reads it at start: restart LiteLLM after adding it.
 #
-# The proxy calls the LLM and the image service directly on the model server:
-# those calls do not pass LiteLLM. Nothing for them here.
+# The proxy calls its three model servers (create, edit, LLM) directly: those
+# calls do not pass LiteLLM. Nothing for them here.

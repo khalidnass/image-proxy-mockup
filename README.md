@@ -2,15 +2,17 @@
 
 An image proxy that sits behind LiteLLM as a model. It answers the OpenAI image
 calls (`/v1/images/generations`, `/v1/images/edits`), checks the content, makes
-the prompt better with an LLM, and calls your image API. It calls the LLM and
-the image service directly on the model server, and it knows the person by the
+the prompt better with an LLM, and calls your image models. It calls three
+model servers directly, all in the OpenAI format (for example vLLM serving
+Qwen-Image): one to create, one to edit, one LLM. It knows the person by the
 user id the gateway writes: **no user id means no access**. It is a template:
 you add your own code in one marked place.
 
 ```
- app ──► gateway ──► LiteLLM ──► image proxy ──► model server (directly)
-         checks the sign-in,        │              ├─ the LLM (prompt enrichment)
-         writes the user id         │              └─ the image service
+ app ──► gateway ──► LiteLLM ──► image proxy ──► model servers (directly)
+         checks the sign-in,        │              ├─ create: /v1/images/generations
+         writes the user id         │              ├─ edit:   /v1/images/edits
+                                    │              └─ LLM:    /v1/chat/completions
                                     └─ forwards the user id header to this model only
 ```
 
@@ -19,16 +21,17 @@ you add your own code in one marked place.
 | app → gateway | `Bearer <the user's sign-in token>` | replaced by the gateway |
 | gateway → LiteLLM | `Bearer <LiteLLM key>` | the user id, from the checked sign-in |
 | LiteLLM → proxy | `Bearer <PROXY_API_KEY>` | the user id (this model only) |
-| proxy → model server | `Bearer <LLM_API_KEY>`, or none | none; the body's `user` carries the user id |
+| proxy → each model server | `Bearer <that server's key>`, or none | none; the body's `user` carries the user id |
 
 The proxy holds no person's token. It prints the user id on every log line of a request, gives it to your
-image code, and sends it to the model server as the body field `user`.
+image code, and always sends it to the model servers as the body field `user`.
 
 ## Add your API or your code
 
 Open `app/your_image_api.py`: `create_image(...)` and `edit_image(...)` sit under the banner
-**PUT YOUR API CALL OR YOUR OWN CODE HERE**. Either point `IMAGE_BACKEND_URL` at your endpoint and adapt
-the request and response mapping, or replace the function body with your own code.
+**PUT YOUR API CALL OR YOUR OWN CODE HERE**. As shipped they call the create and edit servers in the OpenAI
+format. Either point the settings at your own servers (and adapt the request if yours differs), or replace the
+function body with your own code.
 
 - **In:** `prompt`, `model`, `n`, `size`, `extra`, `user` (the user id), `http`, `settings`; edit adds
   `image`, `mask`.
@@ -39,35 +42,50 @@ If your code improves the prompt itself, remove `enrich` from `STEPS` in `app/pi
 
 ### Extra parameters
 
-If your image service takes parameters the OpenAI call does not have, declare them in the same file:
-`EXTRA_PARAMS = {"steps": int, "seed": int, "negative_prompt": str}` (types `int`, `float`, `bool`, `str`).
-Your functions get them as `extra`, checked and typed; undeclared names never reach them.
+The inputs your image model takes beside the OpenAI fields are declared in the same file, `EXTRA_PARAMS` (types
+`int`, `float`, `bool`, `str`). As shipped they are Qwen-Image's, as vLLM names them: `negative_prompt`,
+`true_cfg_scale`, `num_inference_steps`, `seed`. They are passed to the image server by those names. Change the
+list for your model. Your functions get them as `extra`, checked and typed; any other name is refused.
 
 - **In the body** (use this first): a top-level JSON field on create, a form field on edit.
 - **In the `x-image-params` header** (the spare): one JSON object, at most 4 KB, for a client or a gateway that
   drops body fields it does not know. If a name comes both ways, the header wins.
-- **Refused with 400:** an unknown name, a wrong type, a value too long or not finite, a bad header. Text values
-  pass the same content rules as the prompt. Values never go to the LLM or to a log line.
+- **Refused with 400:** an unknown name, a wrong type, a value too long or not finite, a bad header, and a
+  missing required input (create: `prompt`; edit: `prompt` and `image`). Text values pass the same content rules
+  as the prompt. Values never go to the LLM or to a log line.
 
 ## Run the proxy
 
 | Setting | What it is |
 |---|---|
 | `PROXY_API_KEY` | The key LiteLLM sends (the model's `api_key`). Keep it in a Secret. |
-| `LLM_BASE_URL` | The model server's OpenAI address, for example `http://vllm.example.com:8000/v1`. |
-| `ENRICH_MODEL` | The chat model on that server that improves the prompt. |
-| `IMAGE_BACKEND_URL` | Your image service, or the mock (`mock_backend/`). |
-| `LLM_API_KEY`, `IMAGE_API_KEY` | Optional: the model server's and the image service's own keys, from a Secret. Blank: no `Authorization` header. |
+| `IMAGE_CREATE_URL`, `IMAGE_CREATE_MODEL` | The image-create server's address and the model it serves. |
+| `IMAGE_EDIT_URL`, `IMAGE_EDIT_MODEL` | The image-edit server's address and the model it serves. |
+| `LLM_BASE_URL`, `ENRICH_MODEL` | The LLM server's address (ending in `/v1`) and the chat model that improves the prompt. |
+| `IMAGE_CREATE_API_KEY`, `IMAGE_EDIT_API_KEY`, `LLM_API_KEY` | Optional, from a Secret: each server's own key. Blank: no `Authorization` header. Each key goes to its own server only. |
 | `USER_ID_HEADER` | Where the user id arrives. Default `x-litellm-customer-id`. |
 | `TRUST_BODY_USER` | Default `false`. `true` uses the body's `user` when the header is absent; a caller can write that field, so it can be faked. |
 
-Other settings: `app/config.py`. Kubernetes: `deploy/`. Locally, the mock plays the image service and the LLM:
+**Point it at your model servers.** The addresses and models go in the ConfigMap, the keys in the Secret, never in
+the repository:
+
+```yaml
+IMAGE_CREATE_URL: "http://vllm-image.<namespace>.svc:8000"        # serves /v1/images/generations
+IMAGE_CREATE_MODEL: "<the model name that server serves>"
+IMAGE_EDIT_URL: "http://vllm-image-edit.<namespace>.svc:8000"     # serves /v1/images/edits
+IMAGE_EDIT_MODEL: "<the model name that server serves>"
+LLM_BASE_URL: "http://vllm-llm.<namespace>.svc:8000/v1"           # serves /v1/chat/completions
+ENRICH_MODEL: "<the chat model name>"
+```
+
+Other settings: `app/config.py`. Kubernetes: `deploy/`. Locally, the mock plays all three servers:
 
 ```bash
 pip install -r requirements-dev.txt && pytest
 uvicorn mock_backend.main:app --port 8081 &
-export PROXY_API_KEY=$(openssl rand -hex 32)
-export LLM_BASE_URL=http://127.0.0.1:8081/v1 ENRICH_MODEL=mock-llm IMAGE_BACKEND_URL=http://127.0.0.1:8081
+export PROXY_API_KEY=$(openssl rand -hex 32) LLM_BASE_URL=http://127.0.0.1:8081/v1 ENRICH_MODEL=mock-llm
+export IMAGE_CREATE_URL=http://127.0.0.1:8081 IMAGE_CREATE_MODEL=mock-image
+export IMAGE_EDIT_URL=http://127.0.0.1:8081 IMAGE_EDIT_MODEL=mock-image-edit
 uvicorn app.main:app --factory --port 8080
 ```
 
@@ -106,7 +124,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
   -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'                         # 403: no user id
 curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
   -H "Authorization: Bearer $KEY" -H 'x-litellm-customer-id: <user id>' -H 'Content-Type: application/json' \
-  -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse", "steps": 20, "seed": 7}'    # 200: extras in the body
+  -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse", "num_inference_steps": 20, "seed": 7}'    # 200: extras in the body
 curl -s -o /dev/null -w '%{http_code}\n' "$LITELLM/v1/images/generations" \
   -H "Authorization: Bearer $KEY" -H 'x-litellm-customer-id: <user id>' -H 'Content-Type: application/json' \
   -H 'x-image-params: {"negative_prompt": "fog"}' \
@@ -147,7 +165,7 @@ curl -s -o edit.json -w '%{http_code}\n' "$GATEWAY/v1/images/edits" -H "Authoriz
 curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" -H 'Content-Type: application/json' \
   -d '{"model": "image-proxy-mockup", "prompt": "x"}'                                    # 401: no sign-in
 curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/edits" -H "Authorization: Bearer $USER_TOKEN" \
-  -F model=image-proxy-mockup -F prompt='make it blue' -F steps=20 -F image=@create.png # 200: extras as form fields
+  -F model=image-proxy-mockup -F prompt='make it blue' -F num_inference_steps=20 -F image=@create.png # 200: extras as form fields
 curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" \
   -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
   -H 'x-image-params: {"seed": 7}' -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'  # 200: header
@@ -163,13 +181,13 @@ curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" \
 | 403 | No user id reached the proxy: the forward setting is missing or names another model, or the gateway did not write the header. |
 | 404 | The image path is not on the route, or LiteLLM does not know the model. |
 | 400 | The content rules refused the prompt, the user id is not a plain id, or the request is malformed. |
-| 502 | The image service failed or did not return an image. |
+| 502 | The image server failed or did not return an image. |
 
 ## Three rules
 
 - The gateway writes the user id and must replace any value the caller sent.
 - Name only this model in `forward_client_headers_to_llm_api`.
-- Protect the model server (its own key, or a network rule that lets only the proxy in): calls to it no longer pass
-  LiteLLM, so LiteLLM neither checks nor counts them.
+- Protect the model servers (their own keys, or a network rule that lets only the proxy in): calls to them do not
+  pass LiteLLM, so LiteLLM neither checks nor counts them.
 
 MIT licence, see [LICENSE](LICENSE).

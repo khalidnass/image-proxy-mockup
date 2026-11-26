@@ -77,7 +77,8 @@ def test_the_proxy_enriches_with_the_mock_llm(monkeypatch):
                                        content=request.content)
 
     http = httpx.AsyncClient(transport=httpx.MockTransport(route))
-    with TC(create_app(settings(llm_base_url="http://mock/v1", image_backend_url="http://mock"),
+    with TC(create_app(settings(llm_base_url="http://mock/v1", image_create_url="http://mock",
+                                image_edit_url="http://mock"),
                        http=http)) as proxy:
         r = gen(proxy, uid(), prompt="a red fox")
     assert r.status_code == 200 and r.headers["x-prompt-enriched"] == "true"

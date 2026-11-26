@@ -4,11 +4,14 @@
 # The Secret holds the proxy's keys (do not keep the values in git):
 #   PROXY_API_KEY  required: the key LiteLLM sends; the same value is the LiteLLM
 #                  model entry's api_key (examples/litellm-model.yaml)
-#   LLM_API_KEY    optional: the model server's own key (blank: no header sent)
-#   IMAGE_API_KEY  optional: the image service's own key (blank: no header sent)
+#   IMAGE_CREATE_API_KEY, IMAGE_EDIT_API_KEY, LLM_API_KEY
+#                  optional: each model server's own key (blank: no header
+#                  sent); each goes to its own server only
 #   kubectl -n <your-namespace> create secret generic image-proxy \
 #     --from-literal=PROXY_API_KEY="$(openssl rand -hex 32)" \
-#     --from-literal=LLM_API_KEY="<your model server's key, or leave out>"
+#     --from-literal=IMAGE_CREATE_API_KEY="<or leave out>" \
+#     --from-literal=IMAGE_EDIT_API_KEY="<or leave out>" \
+#     --from-literal=LLM_API_KEY="<or leave out>"
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,11 +23,15 @@ data:
   # true: use the body's `user` when the header is absent. A caller can write
   # that field itself, so it can be faked: keep false.
   TRUST_BODY_USER: "false"
-  # The model server, called directly (an OpenAI-compatible server such as vLLM).
-  LLM_BASE_URL: "http://<your model server>:8000/v1"
-  ENRICH_MODEL: "<the chat model name on that server>"   # or mock-llm: the mock
+  # The three model servers, called directly in the OpenAI format (for
+  # example vLLM). The mock in deploy/mock-backend.yaml can play all three.
+  IMAGE_CREATE_URL: "http://vllm-image.<your-namespace>.svc:8000"      # /v1/images/generations
+  IMAGE_CREATE_MODEL: "<the model name it serves>"                   # mock: mock-image
+  IMAGE_EDIT_URL: "http://vllm-image-edit.<your-namespace>.svc:8000"  # /v1/images/edits
+  IMAGE_EDIT_MODEL: "<the model name it serves>"                     # mock: mock-image-edit
+  LLM_BASE_URL: "http://vllm-llm.<your-namespace>.svc:8000/v1"        # /v1/chat/completions
+  ENRICH_MODEL: "<the chat model name>"                              # mock: mock-llm
   SERVED_MODELS: "image-proxy-mockup"
-  IMAGE_BACKEND_URL: "http://image-mock-backend:8081"
   REQUEST_DEADLINE_SECONDS: "240"
 ---
 apiVersion: apps/v1
@@ -43,7 +50,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: proxy
-          image: <your registry>/image-proxy-mockup:0.3.0
+          image: <your registry>/image-proxy-mockup:0.4.0
           ports: [{containerPort: 8080}]
           envFrom:
             - configMapRef: {name: image-proxy}

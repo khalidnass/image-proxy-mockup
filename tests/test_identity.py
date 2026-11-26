@@ -139,7 +139,9 @@ def test_the_llm_call_carries_no_authorization_when_no_key(client, net):
 # --- the settings ------------------------------------------------------------------------------------
 
 def test_trust_body_user_reads_from_the_environment():
-    env = {"PROXY_API_KEY": PROXY_KEY, "LLM_BASE_URL": "http://m/v1", "ENRICH_MODEL": "chat"}
+    env = {"PROXY_API_KEY": PROXY_KEY, "LLM_BASE_URL": "http://m/v1", "ENRICH_MODEL": "chat",
+           "IMAGE_CREATE_URL": "http://c", "IMAGE_CREATE_MODEL": "qc",
+           "IMAGE_EDIT_URL": "http://e", "IMAGE_EDIT_MODEL": "qe"}
     assert from_env(env).trust_body_user is False
     assert from_env({**env, "TRUST_BODY_USER": "true"}).trust_body_user is True
     with pytest.raises(ConfigError):
@@ -147,7 +149,9 @@ def test_trust_body_user_reads_from_the_environment():
 
 
 def test_no_oidc_setting_is_needed():
-    env = {"PROXY_API_KEY": PROXY_KEY, "LLM_BASE_URL": "http://m/v1", "ENRICH_MODEL": "chat"}
+    env = {"PROXY_API_KEY": PROXY_KEY, "LLM_BASE_URL": "http://m/v1", "ENRICH_MODEL": "chat",
+           "IMAGE_CREATE_URL": "http://c", "IMAGE_CREATE_MODEL": "qc",
+           "IMAGE_EDIT_URL": "http://e", "IMAGE_EDIT_MODEL": "qe"}
     s = from_env(env)
     assert s.user_id_header == "x-litellm-customer-id" and not s.llm_api_key
 
@@ -165,7 +169,7 @@ def test_keys_never_reach_an_answer_or_the_image_code(make_client, monkeypatch):
         return your_image_api.ImageOutput(images=[gradient(b"x", 8)])
 
     monkeypatch.setattr(your_image_api, "create_image", create)
-    c = make_client(llm_api_key="model-server-key-0123456789", image_api_key="image-key-0123456789")
+    c = make_client(llm_api_key="model-server-key-0123456789", image_create_api_key="image-key-0123456789")
     answers = [gen(c, uid()), gen(c, None), gen(c, "bad id"), gen(c, uid(), prompt="blocked-example")]
     passed = json.dumps({k: str(v) for k, v in got.items()})
     assert "model-server-key-0123456789" not in passed and PROXY_KEY not in passed

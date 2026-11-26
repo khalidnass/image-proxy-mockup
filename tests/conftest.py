@@ -37,7 +37,8 @@ class FakeNet:
         out = []
         for r in self.calls:
             u = str(r.url)
-            out.append("llm" if u.startswith(LLM) else "backend" if u.startswith(BACKEND) else u)
+            out.append("llm" if u.startswith(LLM) else
+                       "backend" if u.startswith(BACKEND) or "/v1/images/" in u else u)
         return out
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -48,7 +49,7 @@ class FakeNet:
                 raise httpx.ConnectError("down", request=request)
             return httpx.Response(self.llm_status, json={
                 "choices": [{"message": {"role": "assistant", "content": self.llm_text}}]})
-        if url.startswith(BACKEND):
+        if url.startswith(BACKEND) or "/v1/images/" in url:
             if self.backend_body is not None:
                 return httpx.Response(self.backend_status, json=self.backend_body)
             return httpx.Response(self.backend_status, json={"created": 1, "data": [
@@ -57,7 +58,9 @@ class FakeNet:
 
 
 def settings(**over) -> Settings:
-    base = dict(proxy_api_key=PROXY_KEY, llm_base_url=LLM, enrich_model="chat-model", image_backend_url=BACKEND,
+    base = dict(proxy_api_key=PROXY_KEY, llm_base_url=LLM, enrich_model="chat-model",
+                image_create_url=BACKEND, image_create_model="qwen-image",
+                image_edit_url=BACKEND, image_edit_model="qwen-image-edit",
                 served_models=("image-proxy-mockup",))
     base.update(over)
     return Settings(**base).check()

@@ -74,9 +74,10 @@ async def enrich(job: Job, ctx: Context) -> None:
 
 
 async def image(job: Job, ctx: Context) -> None:
-    # the image code gets the settings without the proxy's key and the LLM's key
-    # (it keeps IMAGE_API_KEY: it is the one that calls the image service)
-    safe = dataclasses.replace(ctx.settings, proxy_api_key="", llm_api_key="")
+    # the image code gets only the key of the server it calls: never the proxy's,
+    # the LLM's, or the other image server's
+    other = {"image_create_api_key": ""} if job.kind == "edit" else {"image_edit_api_key": ""}
+    safe = dataclasses.replace(ctx.settings, proxy_api_key="", llm_api_key="", **other)
     common = dict(prompt=job.prompt, model=job.model, n=job.n, size=job.size, extra=dict(job.extra),
                   user=ctx.user.name, http=ctx.http, settings=safe)
     try:

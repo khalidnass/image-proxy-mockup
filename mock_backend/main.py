@@ -1,5 +1,5 @@
-"""The mock backend: a stand-in for your custom image endpoint, and a tiny
-chat model so the enrichment step needs no real LLM.
+"""The mock backend: a stand-in for the three model servers (image create,
+image edit, and the chat model), so the whole proxy runs with no real model.
 
 It speaks the OpenAI shapes. Images are real PNGs drawn from a hash of the
 inputs, so the same request always gives the same picture. The chat answer
@@ -111,7 +111,7 @@ async def chat(request: Request):
                   "total_tokens": prompt_tokens + completion_tokens}})
 
 
-EXTRAS = ("steps", "seed", "negative_prompt")  # the example extra parameters
+EXTRAS = ("negative_prompt", "true_cfg_scale", "num_inference_steps", "seed")  # Qwen-Image's inputs
 
 
 _PLAIN_ID = re.compile(r"^[A-Za-z0-9._@-]{1,128}$")

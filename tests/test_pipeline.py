@@ -47,7 +47,7 @@ def test_enrichment_carries_the_model_servers_key_when_set(make_client, net):
 
 
 def test_the_image_service_gets_the_user_id_and_its_own_key_only(make_client, net):
-    c = make_client(llm_api_key="model-server-key-0123456789", image_api_key="image-key-0123456789")
+    c = make_client(llm_api_key="model-server-key-0123456789", image_create_api_key="image-key-0123456789")
     gen(c, uid("alice"))
     backend = [x for x in net.calls if "mock-backend" in str(x.url)][0]
     assert backend.headers["authorization"] == "Bearer image-key-0123456789"

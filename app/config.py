@@ -50,9 +50,15 @@ class Settings:
     enrich_timeout_seconds: float = 20.0
     # The model names this proxy answers to (as LiteLLM sends them).
     served_models: tuple[str, ...] = ("image-proxy-mockup",)
-    # The image service the shipped code in your_image_api.py calls, and its key.
-    image_backend_url: str = "http://mock-backend:8081"
-    image_api_key: str = ""
+    # The two image servers (OpenAI format) the shipped code in your_image_api.py
+    # calls: the server root (…/v1/images/… is added), the model name it serves,
+    # and its own key (blank: no header).
+    image_create_url: str = ""
+    image_create_model: str = ""
+    image_create_api_key: str = ""
+    image_edit_url: str = ""
+    image_edit_model: str = ""
+    image_edit_api_key: str = ""
     image_timeout_seconds: float = 180.0
     # Whole-request deadline. Keep it below LiteLLM's own timeout (300 s).
     request_deadline_seconds: float = 240.0
@@ -67,6 +73,10 @@ class Settings:
             raise ConfigError("PROXY_API_KEY must be set (16 characters or more)")
         if not self.llm_base_url or not self.enrich_model:
             raise ConfigError("LLM_BASE_URL and ENRICH_MODEL must be set")
+        if not self.image_create_url or not self.image_create_model:
+            raise ConfigError("IMAGE_CREATE_URL and IMAGE_CREATE_MODEL must be set")
+        if not self.image_edit_url or not self.image_edit_model:
+            raise ConfigError("IMAGE_EDIT_URL and IMAGE_EDIT_MODEL must be set")
         if self.enrich_model in self.served_models:
             raise ConfigError(
                 f"ENRICH_MODEL {self.enrich_model!r} is a model this proxy serves: "
@@ -85,11 +95,23 @@ class Settings:
 
     def secrets(self) -> tuple[str, ...]:
         """Every key this proxy holds: never in a log line or an answer."""
-        return tuple(s for s in (self.proxy_api_key, self.llm_api_key, self.image_api_key) if s)
+        return tuple(s for s in (self.proxy_api_key, self.llm_api_key, self.image_create_api_key,
+                                 self.image_edit_api_key) if s)
+
+
+def _server_root(url: str) -> str:
+    """A server's root address: a trailing / or /v1 is taken off (…/v1/images/… is added)."""
+    url = url.strip().rstrip("/")
+    return url[:-3] if url.endswith("/v1") else url
 
 
 def from_env(env: dict | None = None) -> Settings:
     e = os.environ if env is None else env
+    if (e.get("IMAGE_BACKEND_URL") or e.get("IMAGE_API_KEY")) and not (
+            e.get("IMAGE_CREATE_URL") or e.get("IMAGE_EDIT_URL")):
+        raise ConfigError("IMAGE_BACKEND_URL and IMAGE_API_KEY are replaced by IMAGE_CREATE_URL, "
+                          "IMAGE_CREATE_MODEL, IMAGE_EDIT_URL and IMAGE_EDIT_MODEL (and the optional "
+                          "IMAGE_CREATE_API_KEY and IMAGE_EDIT_API_KEY)")
     d = Settings.__dataclass_fields__
 
     def get(name: str, key: str):
@@ -105,8 +127,12 @@ def from_env(env: dict | None = None) -> Settings:
         enrich_model=get("ENRICH_MODEL", "enrich_model"),
         enrich_timeout_seconds=float(get("ENRICH_TIMEOUT_SECONDS", "enrich_timeout_seconds")),
         served_models=_list(e.get("SERVED_MODELS", "image-proxy-mockup")),
-        image_backend_url=get("IMAGE_BACKEND_URL", "image_backend_url").rstrip("/"),
-        image_api_key=e.get("IMAGE_API_KEY", ""),
+        image_create_url=_server_root(get("IMAGE_CREATE_URL", "image_create_url")),
+        image_create_model=get("IMAGE_CREATE_MODEL", "image_create_model"),
+        image_create_api_key=e.get("IMAGE_CREATE_API_KEY", ""),
+        image_edit_url=_server_root(get("IMAGE_EDIT_URL", "image_edit_url")),
+        image_edit_model=get("IMAGE_EDIT_MODEL", "image_edit_model"),
+        image_edit_api_key=e.get("IMAGE_EDIT_API_KEY", ""),
         image_timeout_seconds=float(get("IMAGE_TIMEOUT_SECONDS", "image_timeout_seconds")),
         request_deadline_seconds=float(get("REQUEST_DEADLINE_SECONDS", "request_deadline_seconds")),
         blocked_terms_file=get("BLOCKED_TERMS_FILE", "blocked_terms_file"),

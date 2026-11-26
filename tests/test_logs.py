@@ -20,7 +20,7 @@ IMAGE_KEY = "image-service-key-0123456789"
 
 def test_no_prompt_key_or_image_in_logs(make_client, net, capsys, caplog):
     caplog.set_level(logging.DEBUG)
-    client = make_client(llm_api_key=LLM_KEY, image_api_key=IMAGE_KEY)
+    client = make_client(llm_api_key=LLM_KEY, image_create_api_key=IMAGE_KEY)
     net.llm_text = "an enriched lighthouse answer 9912"
     r = gen(client, uid("alice"), prompt=PROMPT)
     assert r.status_code == 200
