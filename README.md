@@ -54,6 +54,14 @@ list for your model. Your functions get them as `extra`, checked and typed; any 
   missing required input (create: `prompt`; edit: `prompt` and `image`). Text values pass the same content rules
   as the prompt. Values never go to the LLM or to a log line.
 
+### Your own route
+
+`app/your_custom_api.py` is an example route of your own, `POST /v1/customline` (banner **PUT YOUR OWN ROUTE
+HERE**): JSON in, JSON out, for an API that is not an OpenAI call (an enrichment API, something an app of yours
+calls). It gets the same protection as the image routes: the `PROXY_API_KEY` caller check, the user id from the
+gateway (no id: 403), the content rules on every text value, OpenAI-shaped errors, and a log line with the user id
+and no value. Copy the file for each API of yours and add its router in `app/main.py`.
+
 ## Run the proxy
 
 | Setting | What it is |
@@ -169,6 +177,27 @@ curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/edits" -H "Authoriz
 curl -s -o /dev/null -w '%{http_code}\n' "$GATEWAY/v1/images/generations" \
   -H "Authorization: Bearer $USER_TOKEN" -H 'Content-Type: application/json' \
   -H 'x-image-params: {"seed": 7}' -d '{"model": "image-proxy-mockup", "prompt": "a lighthouse"}'  # 200: header
+```
+
+### A route of your own behind the gateway
+
+LiteLLM sends only the calls it knows to a model, so `/v1/customline` needs its own way in. Use the gateway,
+straight to the proxy:
+
+- a gateway route for the path, with the proxy's Service as its backend;
+- its policy checks the user's sign-in, writes the user id into `x-litellm-customer-id` (replacing any value the
+  caller sent), and sets `Authorization` to `Bearer <PROXY_API_KEY>`;
+- a network rule that lets the gateway reach the proxy.
+
+LiteLLM is not involved and records nothing for these calls. LiteLLM's own pass-through is the other way, and it
+needs more: the caller's LiteLLM key must be allowed on pass-through routes, the proxy key must be kept in the
+pass-through's headers, and the user id must be sent as `x-pass-x-litellm-customer-id` (a pass-through added at
+run time forwards only `x-pass-` headers, without the prefix). LiteLLM then records the call on the person.
+
+```bash
+curl -s -w '\n%{http_code}\n' "$GATEWAY/v1/customline" -H "Authorization: Bearer $USER_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"text": "hello", "level": 3}'
+# {"object": "customline", "user": "<your id>", "inputs": ["level", "text"]}  200; no sign-in: 401
 ```
 
 ## What the answer means
