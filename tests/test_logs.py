@@ -1,8 +1,8 @@
-"""No prompt, no answer, no image and no token in any log line."""
+"""No prompt, no answer, no image and no key in any log line; the user id in every request's line."""
 import base64
 import logging
 
-from conftest import PROXY_KEY, gen, headers, make_token
+from conftest import PROXY_KEY, gen, headers, uid
 from mock_backend.png import gradient
 
 PROMPT = "a secret lighthouse prompt 7731"
@@ -14,39 +14,52 @@ def _capture(capsys, caplog):
         f"{r.getMessage()} {r.__dict__}" for r in caplog.records)
 
 
-def test_no_prompt_token_or_image_in_logs(client, net, capsys, caplog):
+LLM_KEY = "model-server-key-0123456789"
+IMAGE_KEY = "image-service-key-0123456789"
+
+
+def test_no_prompt_key_or_image_in_logs(make_client, net, capsys, caplog):
     caplog.set_level(logging.DEBUG)
-    token = make_token("alice")
+    client = make_client(llm_api_key=LLM_KEY, image_api_key=IMAGE_KEY)
     net.llm_text = "an enriched lighthouse answer 9912"
-    r = gen(client, token, prompt=PROMPT)
+    r = gen(client, uid("alice"), prompt=PROMPT)
     assert r.status_code == 200
     image_b64 = r.json()["data"][0]["b64_json"]
     # the refusal paths too
-    gen(client, token, prompt="a blocked-example " + PROMPT)
-    gen(client, token + "x", prompt=PROMPT)
-    client.post("/v1/images/edits", headers=headers(token),
+    gen(client, uid("alice"), prompt="a blocked-example " + PROMPT)
+    gen(client, None, prompt=PROMPT)
+    gen(client, "not a plain id", prompt=PROMPT)
+    client.post("/v1/images/edits", headers=headers(uid("alice")),
                 data={"model": "image-proxy-mockup", "prompt": PROMPT},
                 files={"image": ("in.png", gradient(b"in", 8), "image/png")})
     net.backend_status = 500
-    gen(client, token, prompt=PROMPT)
+    gen(client, uid("alice"), prompt=PROMPT)
 
     logs = _capture(capsys, caplog)
-    assert "alice" in logs and "guardrail_in" in logs  # the log is not just empty
-    for secret in (PROMPT, "lighthouse", "9912", token, token.split(".")[1], PROXY_KEY,
-                   image_b64[:40], "eyJ"):
+    assert "guardrail_in" in logs  # the log is not just empty
+    for secret in (PROMPT, "lighthouse", "9912", PROXY_KEY, LLM_KEY, IMAGE_KEY, image_b64[:40]):
         assert secret not in logs, f"leaked into logs: {secret[:12]}"
+
+
+def test_every_line_of_a_request_carries_the_user_id(client, capsys):
+    import json
+    capsys.readouterr()
+    gen(client, uid("dana"))
+    lines = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x.startswith("{")]
+    request_lines = [x for x in lines if x.get("request_id") not in (None, "-")]
+    assert request_lines and all(x.get("user") == "dana" for x in request_lines)
 
 
 def test_redact_filter_is_a_second_line(capsys):
     from app import logs
     logs.setup()
-    logs.log.info("oops Bearer abc.def and %s", make_token())
+    logs.log.info("oops Bearer abc.def and %s", uid())
     out = capsys.readouterr().out
     assert "eyJ" not in out and "abc.def" not in out and "[redacted]" in out
 
 
 def test_validation_errors_do_not_echo_the_prompt(client):
-    r = client.post("/v1/images/generations", headers=headers(make_token()),
+    r = client.post("/v1/images/generations", headers=headers(uid()),
                     content=b'{"model": 5, "prompt": "' + PROMPT.encode() + b'"',
                     )
     assert r.status_code == 400 and PROMPT not in r.text

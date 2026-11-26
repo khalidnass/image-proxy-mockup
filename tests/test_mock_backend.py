@@ -50,21 +50,17 @@ def test_chat_refuses_empty_and_streaming():
                   "messages": [{"role": "user", "content": "x"}]}).status_code == 400
 
 
-def test_chat_logs_only_whether_the_header_came(monkeypatch, capsys):
-    monkeypatch.setenv("MOCK_LOG_TOKEN_HEADER", "true")
+def test_the_mock_prints_the_user_id_and_never_the_text(capsys):
     secret_text = "a secret lighthouse 4471"
-    c.post("/v1/chat/completions", headers={"x-user-token": "token-value-must-not-show"},
-           json={"messages": [{"role": "user", "content": secret_text}]})
+    capsys.readouterr()
+    c.post("/v1/chat/completions", json={"user": "erin", "messages": [{"role": "user", "content": secret_text}]})
     c.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": secret_text}]})
+    c.post("/v1/chat/completions", json={"user": "bad id;x", "messages": [{"role": "user", "content": "x"}]})
+    c.post("/v1/images/generations", json={"prompt": secret_text, "size": "16x16", "user": "erin"})
     out = capsys.readouterr().out
-    assert "present=yes" in out and "present=no" in out
-    assert "token-value-must-not-show" not in out and "lighthouse" not in out
-
-
-def test_chat_logs_nothing_by_default(monkeypatch, capsys):
-    monkeypatch.delenv("MOCK_LOG_TOKEN_HEADER", raising=False)
-    c.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "a fox"}]})
-    assert capsys.readouterr().out == ""
+    assert "mock chat: user=erin" in out and "mock chat: user=-" in out
+    assert "mock image create: user=erin" in out
+    assert "lighthouse" not in out and "bad id" not in out
 
 
 def test_the_proxy_enriches_with_the_mock_llm(monkeypatch):
@@ -72,11 +68,9 @@ def test_the_proxy_enriches_with_the_mock_llm(monkeypatch):
     import httpx
     from fastapi.testclient import TestClient as TC
     from app.main import create_app
-    from conftest import JWKS, JWKS_URL, gen, make_token, settings
+    from conftest import gen, uid, settings
 
     async def route(request: httpx.Request) -> httpx.Response:
-        if str(request.url) == JWKS_URL:
-            return httpx.Response(200, json=JWKS)
         inner = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://mock")
         async with inner:
             return await inner.request(request.method, request.url.path, headers=request.headers,
@@ -85,7 +79,7 @@ def test_the_proxy_enriches_with_the_mock_llm(monkeypatch):
     http = httpx.AsyncClient(transport=httpx.MockTransport(route))
     with TC(create_app(settings(llm_base_url="http://mock/v1", image_backend_url="http://mock"),
                        http=http)) as proxy:
-        r = gen(proxy, make_token(), prompt="a red fox")
+        r = gen(proxy, uid(), prompt="a red fox")
     assert r.status_code == 200 and r.headers["x-prompt-enriched"] == "true"
     assert r.json()["data"][0]["revised_prompt"] == "a red fox, clear subject, soft light, simple composition"
 

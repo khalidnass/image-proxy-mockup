@@ -1,7 +1,7 @@
 """Logging: one JSON line per event, and only these fields.
 
 A log line holds a request id, a step name, a status, a duration and the
-verified user name. Never a prompt, an LLM answer, an image or a token.
+user id (`user`). Never a prompt, an LLM answer, an image or a key.
 The redacting filter below is a second line of defence, not the first:
 the code never passes those values to a logger.
 """
@@ -31,10 +31,19 @@ class _JsonFormatter(logging.Formatter):
 
 
 class _Redact(logging.Filter):
+    def __init__(self, exact: tuple[str, ...] = ()):
+        super().__init__()
+        self.exact = tuple(s for s in exact if s)
+
+    def _clean(self, text: str) -> str:
+        for secret in self.exact:  # the proxy's own keys, by their exact value
+            text = text.replace(secret, "[redacted]")
+        return _SECRETS.sub("[redacted]", text)
+
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = _SECRETS.sub("[redacted]", str(record.msg))
+        record.msg = self._clean(str(record.msg))
         if record.args:
-            record.args = tuple(_SECRETS.sub("[redacted]", str(a)) for a in record.args)
+            record.args = tuple(self._clean(str(a)) for a in record.args)
         return True
 
 
@@ -50,10 +59,10 @@ class _Stdout(logging.StreamHandler):
         pass
 
 
-def setup(level: str = "INFO") -> None:
+def setup(level: str = "INFO", secrets: list[str] | None = None) -> None:
     handler = _Stdout()
     handler.setFormatter(_JsonFormatter())
-    handler.addFilter(_Redact())
+    handler.addFilter(_Redact(tuple(secrets or ())))
     log.handlers[:] = [handler]
     log.setLevel(level)
     log.propagate = False

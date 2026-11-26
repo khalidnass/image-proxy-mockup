@@ -12,6 +12,7 @@ never with its data.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
@@ -36,6 +37,7 @@ class Job:
     image: bytes | None = None  # edit only
     mask: bytes | None = None   # edit only
     extra: dict = field(default_factory=dict)  # checked extra parameters: image code only
+    body_user: object = None  # the body's `user`: used only with TRUST_BODY_USER
     # Filled in by the steps:
     revised_prompt: str | None = None
     enriched: bool = False
@@ -59,7 +61,7 @@ async def guardrail_in(job: Job, ctx: Context) -> None:
 
 
 async def enrich(job: Job, ctx: Context) -> None:
-    better, ok = await enrich_prompt(job.prompt, user_token=ctx.user.token,
+    better, ok = await enrich_prompt(job.prompt, user_id=ctx.user.name,
                                      settings=ctx.settings, http=ctx.http)
     if ok:
         try:  # the enriched text must pass the same rules as the original
@@ -72,8 +74,11 @@ async def enrich(job: Job, ctx: Context) -> None:
 
 
 async def image(job: Job, ctx: Context) -> None:
+    # the image code gets the settings without the proxy's key and the LLM's key
+    # (it keeps IMAGE_API_KEY: it is the one that calls the image service)
+    safe = dataclasses.replace(ctx.settings, proxy_api_key="", llm_api_key="")
     common = dict(prompt=job.prompt, model=job.model, n=job.n, size=job.size, extra=dict(job.extra),
-                  user=ctx.user.name, http=ctx.http, settings=ctx.settings)
+                  user=ctx.user.name, http=ctx.http, settings=safe)
     try:
         if job.kind == "edit":
             out = await your_image_api.edit_image(image=job.image, mask=job.mask, **common)

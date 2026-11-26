@@ -1,6 +1,7 @@
-# The mock backend: a stand-in for your own image endpoint, and a tiny chat
-# model (POST /v1/chat/completions) for the enrichment step. Delete it when
-# your_image_api.py calls the real thing and ENRICH_MODEL is a real model.
+# The mock backend: a stand-in for your own image service, and a tiny chat
+# model (POST /v1/chat/completions) that stands in for the model server.
+# Delete it when your_image_api.py calls the real thing and LLM_BASE_URL
+# points at your model server.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,7 +18,7 @@ spec:
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
       containers:
         - name: mock
-          image: <your registry>/image-proxy-mockup:0.2.1
+          image: <your registry>/image-proxy-mockup:0.3.0
           command: ["uvicorn", "mock_backend.main:app", "--host", "0.0.0.0", "--port", "8081", "--no-access-log"]
           ports: [{containerPort: 8081}]
           readinessProbe: {httpGet: {path: /healthz, port: 8081}}
@@ -49,6 +50,4 @@ spec:
   ingress:
     - from:
         - podSelector: {matchLabels: {app: image-proxy}}
-        # LiteLLM, if it serves the mock as a chat model (examples/litellm-model.yaml)
-        - podSelector: {matchLabels: {app: <your litellm pod label>}}
       ports: [{port: 8081}]

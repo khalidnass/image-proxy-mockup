@@ -14,10 +14,12 @@ THE CONTRACT (the same for both functions)
            size       str | None  for example "1024x1024", or None
            extra      dict         your EXTRA_PARAMS (below) the caller sent, already
                                    checked and typed; only declared names, maybe empty
-           user       str          the verified user name (for your own audit,
-                                   not a secret; the user's token is NOT given here)
+           user       str          the user id the gateway sent (for your own audit
+                                   and for your image service's log)
            http       httpx.AsyncClient   a shared client; pass your own timeout
-           settings   Settings     the proxy's settings (IMAGE_BACKEND_URL, ...)
+           settings   Settings     the proxy's settings (IMAGE_BACKEND_URL,
+                                   IMAGE_API_KEY, ...), without the proxy's and the
+                                   LLM's keys
            edit_image only:
            image      bytes        the input image as uploaded
            mask       bytes | None the mask, if one was sent
@@ -88,9 +90,10 @@ EXTRA_PARAMS: dict[str, type] = {
 async def create_image(*, prompt: str, model: str, n: int, size: str | None, extra: dict,
                        user: str, http: httpx.AsyncClient, settings: Settings) -> ImageOutput:
     # The shipped body calls the mock backend (mock_backend/), which speaks
-    # the OpenAI image shape plus the three example extras. Add your
-    # endpoint's own auth header here, and map `extra` to its own names.
-    body = {"prompt": prompt, "n": n, "size": size or "256x256", **extra}
+    # the OpenAI image shape plus the three example extras. It sends
+    # IMAGE_API_KEY when set, and the user id, so your image service's log
+    # can show who asked. Map `extra` to your service's own names.
+    body = {"prompt": prompt, "n": n, "size": size or "256x256", "user": user, **extra}
     r = await _post(http, f"{settings.image_backend_url}/v1/images/generations",
                     settings, json=body)
     return _openai_shape_to_output(r)
@@ -112,7 +115,7 @@ async def edit_image(*, prompt: str, image: bytes, mask: bytes | None, model: st
     files = {"image": ("image.png", image, "image/png")}
     if mask is not None:
         files["mask"] = ("mask.png", mask, "image/png")
-    data = {"prompt": prompt, "n": str(n), "size": size or "256x256",
+    data = {"prompt": prompt, "n": str(n), "size": size or "256x256", "user": user,
             **{k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in extra.items()}}
     r = await _post(http, f"{settings.image_backend_url}/v1/images/edits",
                     settings, data=data, files=files)
@@ -122,8 +125,9 @@ async def edit_image(*, prompt: str, image: bytes, mask: bytes | None, model: st
 # --- helpers for the shipped body; delete them if you replace it -------------
 
 async def _post(http: httpx.AsyncClient, url: str, settings: Settings, **kwargs) -> httpx.Response:
+    headers = {"Authorization": f"Bearer {settings.image_api_key}"} if settings.image_api_key else {}
     try:
-        r = await http.post(url, timeout=settings.image_timeout_seconds, **kwargs)
+        r = await http.post(url, headers=headers, timeout=settings.image_timeout_seconds, **kwargs)
     except httpx.TimeoutException:
         raise ImageBackendError("The image service did not answer in time.")
     except httpx.HTTPError:

@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 class ProxyError(Exception):
     """Stops the request. `message` goes to the caller: never put a prompt,
-    a token or a backend's raw answer in it."""
+    a key or a backend's raw answer in it."""
 
     def __init__(self, status: int, message: str, *, type_: str = "invalid_request_error",
                  code: str | None = None, param: str | None = None):
@@ -31,9 +31,9 @@ def unauthorized(message: str, code: str) -> ProxyError:
 
 
 # 403, not 401: some gateways pause a model after a 401.
-USER_TOKEN_REFUSAL_STATUS = 403
+USER_REFUSAL_STATUS = 403
 
 
 def user_refused(message: str, code: str) -> ProxyError:
-    """The person's token is missing or does not verify."""
-    return ProxyError(USER_TOKEN_REFUSAL_STATUS, message, type_="authentication_error", code=code)
+    """No user id reached the proxy: no user means no access."""
+    return ProxyError(USER_REFUSAL_STATUS, message, type_="authentication_error", code=code)

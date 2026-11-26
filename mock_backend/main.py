@@ -3,15 +3,14 @@ chat model so the enrichment step needs no real LLM.
 
 It speaks the OpenAI shapes. Images are real PNGs drawn from a hash of the
 inputs, so the same request always gives the same picture. The chat answer
-is a fixed rewrite of the prompt. It never logs a prompt, an answer or an
-image.
+is a fixed rewrite of the prompt. Like a model server's own log, it prints
+the user id each call names; it never logs a prompt, an answer or an image.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import logging
-import os
 import re
 import sys
 import time
@@ -82,10 +81,8 @@ async def chat(request: Request):
     """A tiny OpenAI chat model, so the whole mockup runs with no real LLM.
 
     It answers with a canned, deterministic rewrite of the last user message.
-    Non-streaming only. It logs nothing about the text. With
-    MOCK_LOG_TOKEN_HEADER=true it logs one line per call saying whether an
-    `x-user-token` header arrived (yes/no, never the value): a check that
-    the user's token does NOT reach models outside LiteLLM's forward list."""
+    Non-streaming only. Like a model server's own log, it prints one line per
+    call with the body's `user` (the user id the proxy sends), never the text."""
     try:
         body = await request.json()
         messages = body.get("messages") or []
@@ -99,9 +96,7 @@ async def chat(request: Request):
         return _bad("a user message is required")
     if body.get("stream"):
         return _bad("streaming is not supported by the mock")
-    if os.environ.get("MOCK_LOG_TOKEN_HEADER", "").lower() == "true":
-        log.info("mock chat: x-user-token header present=%s",
-                 "yes" if request.headers.get("x-user-token") else "no")
+    log.info("mock chat: user=%s", _user_of(body))
     answer = last.strip().rstrip(".") + REWRITE_SUFFIX
     prompt_tokens = sum(len(str(m.get("content") or "").split()) for m in messages if isinstance(m, dict))
     completion_tokens = len(answer.split())
@@ -117,6 +112,15 @@ async def chat(request: Request):
 
 
 EXTRAS = ("steps", "seed", "negative_prompt")  # the example extra parameters
+
+
+_PLAIN_ID = re.compile(r"^[A-Za-z0-9._@-]{1,128}$")
+
+
+def _user_of(fields) -> str:
+    """The `user` field, printed only when it is a plain id ("-" otherwise)."""
+    value = fields.get("user") if hasattr(fields, "get") else None
+    return value if isinstance(value, str) and _PLAIN_ID.match(value) else "-"
 
 
 def _extras_seed(fields) -> str:
@@ -136,6 +140,7 @@ async def generations(request: Request):
     except _TooBig:
         return _bad(f"size must be at most {MAX_SIDE}x{MAX_SIDE}")
     extra = _extras_seed(body)
+    log.info("mock image create: user=%s", _user_of(body))
     return _answer([gradient(f"{prompt}|{i}|{extra}".encode(), w, h) for i in range(n)])
 
 
@@ -154,4 +159,5 @@ async def edits(request: Request):
         return _bad(f"size must be at most {MAX_SIDE}x{MAX_SIDE}")
     digest = hashlib.sha256(data).digest()
     extra = _extras_seed(form)
+    log.info("mock image edit: user=%s", _user_of(form))
     return _answer([stripes(f"{prompt}|{i}|{extra}".encode() + digest, w, h) for i in range(n)])

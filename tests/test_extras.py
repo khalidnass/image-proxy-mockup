@@ -5,7 +5,7 @@ import pytest
 
 from app import extras, your_image_api
 from app.config import ConfigError
-from conftest import gen, headers, make_token
+from conftest import gen, headers, uid
 from mock_backend.png import gradient
 
 
@@ -34,40 +34,40 @@ def _edit(client, token, data, hdr=None):
 
 
 def test_body_json_on_create(client, seen):
-    r = gen(client, make_token(), steps=20, seed=7, negative_prompt="no fog")
+    r = gen(client, uid(), steps=20, seed=7, negative_prompt="no fog")
     assert r.status_code == 200
     assert seen["extra"] == {"steps": 20, "seed": 7, "negative_prompt": "no fog"}
 
 
 def test_form_fields_on_edit_are_typed(client, seen):
-    r = _edit(client, make_token(), {"steps": "30", "negative_prompt": "no fog"})
+    r = _edit(client, uid(), {"steps": "30", "negative_prompt": "no fog"})
     assert r.status_code == 200
     assert seen["extra"] == {"steps": 30, "negative_prompt": "no fog"}
 
 
 def test_header_on_create_and_on_edit(client, seen):
     hdr = {"x-image-params": json.dumps({"seed": 5, "steps": 12})}
-    r = client.post("/v1/images/generations", headers={**headers(make_token()), **hdr},
+    r = client.post("/v1/images/generations", headers={**headers(uid()), **hdr},
                     json={"model": "image-proxy-mockup", "prompt": "a fox"})
     assert r.status_code == 200 and seen["extra"] == {"seed": 5, "steps": 12}
-    assert _edit(client, make_token(), {}, hdr).status_code == 200
+    assert _edit(client, uid(), {}, hdr).status_code == 200
     assert seen["extra"] == {"seed": 5, "steps": 12}
 
 
 def test_the_header_wins(client, seen):
     r = client.post("/v1/images/generations",
-                    headers={**headers(make_token()), "x-image-params": json.dumps({"steps": 9})},
+                    headers={**headers(uid()), "x-image-params": json.dumps({"steps": 9})},
                     json={"model": "image-proxy-mockup", "prompt": "a fox", "steps": 50, "seed": 1})
     assert r.status_code == 200 and seen["extra"] == {"steps": 9, "seed": 1}
 
 
 def test_no_extras_is_an_empty_dict(client, seen):
-    assert gen(client, make_token()).status_code == 200 and seen["extra"] == {}
+    assert gen(client, uid()).status_code == 200 and seen["extra"] == {}
 
 
 @pytest.mark.parametrize("how", ["body", "header", "form"])
 def test_unknown_name_is_400_and_no_image_call(client, net, seen, how):
-    token = make_token()
+    token = uid()
     if how == "body":
         r = gen(client, token, guidance=3)
     elif how == "header":
@@ -81,42 +81,42 @@ def test_unknown_name_is_400_and_no_image_call(client, net, seen, how):
 
 
 def test_standard_openai_fields_are_accepted(client, seen):
-    r = gen(client, make_token(), quality="high", user="someone", output_format="png")
+    r = gen(client, uid(), quality="high", user="someone", output_format="png")
     assert r.status_code == 200 and seen["extra"] == {}
 
 
 @pytest.mark.parametrize("value", ["twenty", 2.5, True, None, [1]])
 def test_wrong_type_is_400(client, seen, value):
-    r = gen(client, make_token(), steps=value)
+    r = gen(client, uid(), steps=value)
     assert r.status_code == 400 and seen == {}
 
 
 def test_wrong_type_in_a_form_field_is_400(client, seen):
-    assert _edit(client, make_token(), {"steps": "lots"}).status_code == 400 and seen == {}
+    assert _edit(client, uid(), {"steps": "lots"}).status_code == 400 and seen == {}
 
 
 def test_a_value_is_never_echoed(client):
     secret = "hidden-value-4471"
-    for r in (gen(client, make_token(), steps=secret),
-              gen(client, make_token(), negative_prompt="x" * 5000 + secret),
-              gen(client, make_token(), negative_prompt="a blocked-example " + secret)):
+    for r in (gen(client, uid(), steps=secret),
+              gen(client, uid(), negative_prompt="x" * 5000 + secret),
+              gen(client, uid(), negative_prompt="a blocked-example " + secret)):
         assert r.status_code == 400 and secret not in r.text
 
 
 def test_blocked_term_in_a_string_extra_is_400(client, net, seen):
-    r = gen(client, make_token(), negative_prompt="a Blocked-Example here")
+    r = gen(client, uid(), negative_prompt="a Blocked-Example here")
     assert r.status_code == 400 and r.json()["error"]["code"] == "content_policy_violation"
     assert seen == {} and "llm" not in net.names()
 
 
 def test_too_long_string_is_400(make_client, seen):
     c = make_client(max_prompt_chars=20)
-    assert gen(c, make_token(), prompt="a fox", negative_prompt="x" * 21).status_code == 400
+    assert gen(c, uid(), prompt="a fox", negative_prompt="x" * 21).status_code == 400
 
 
 @pytest.mark.parametrize("raw", ["not json", "[1, 2]", '"text"', json.dumps({"steps": "x" * 5000})])
 def test_bad_or_oversize_header_is_400(client, seen, raw):
-    r = client.post("/v1/images/generations", headers={**headers(make_token()), "x-image-params": raw},
+    r = client.post("/v1/images/generations", headers={**headers(uid()), "x-image-params": raw},
                     json={"model": "image-proxy-mockup", "prompt": "a fox"})
     assert r.status_code == 400 and seen == {}
 
@@ -124,29 +124,29 @@ def test_bad_or_oversize_header_is_400(client, seen, raw):
 def test_a_non_finite_number_is_400(monkeypatch, make_client, seen):
     monkeypatch.setitem(your_image_api.EXTRA_PARAMS, "scale", float)
     c = make_client()  # the declaration is read when the app is made
-    ok = _edit(c, make_token(), {"scale": "1.5"})
+    ok = _edit(c, uid(), {"scale": "1.5"})
     assert ok.status_code == 200 and seen["extra"] == {"scale": 1.5}
     seen.clear()
-    for r in (_edit(c, make_token(), {"scale": "nan"}),
+    for r in (_edit(c, uid(), {"scale": "nan"}),
               c.post("/v1/images/generations",
-                     headers={**headers(make_token()), "x-image-params": '{"scale": Infinity}'},
+                     headers={**headers(uid()), "x-image-params": '{"scale": Infinity}'},
                      json={"model": "image-proxy-mockup", "prompt": "a fox"})):
         assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_extra_parameter"
     assert seen == {}
 
 
 def test_extras_never_reach_the_enrichment_call(client, net):
-    gen(client, make_token(), steps=20, seed=7, negative_prompt="no-fog-marker")
+    gen(client, uid(), steps=20, seed=7, negative_prompt="no-fog-marker")
     llm = [c for c in net.calls if str(c.url).endswith("/chat/completions")][0]
     body = llm.content.decode()
     assert "no-fog-marker" not in body and "steps" not in body and "seed" not in body
 
 
 def test_extras_reach_the_mock_backend_and_change_the_picture(client, net):
-    a = gen(client, make_token(), prompt="a fox")
+    a = gen(client, uid(), prompt="a fox")
     sent = [c for c in net.calls if "mock-backend" in str(c.url)][-1]
     assert "steps" not in json.loads(sent.content)
-    gen(client, make_token(), prompt="a fox", steps=20)
+    gen(client, uid(), prompt="a fox", steps=20)
     sent = [c for c in net.calls if "mock-backend" in str(c.url)][-1]
     assert json.loads(sent.content)["steps"] == 20
 
@@ -172,7 +172,7 @@ def test_mock_backend_folds_extras_into_the_picture():
 
 def test_values_never_reach_the_logs(client, capsys):
     capsys.readouterr()
-    token = make_token()
+    token = uid()
     gen(client, token, steps=20, seed=777001, negative_prompt="secret-negative-7731")
     _edit(client, token, {"negative_prompt": "secret-negative-7731"},
           {"x-image-params": json.dumps({"seed": 777001})})
